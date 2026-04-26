@@ -1,0 +1,14 @@
+[Unit]
+Description=OP UDP CUSTOM by OfficialOnePesewa
+After=network.target
+
+[Service]
+User=root
+Type=simple
+ExecStart=INSTALL_DIR/bin/udp-custom server
+WorkingDirectory=INSTALL_DIR/
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=default.target
