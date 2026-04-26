@@ -1,0 +1,3 @@
+curl -L -o module/udpgw \
+  https://github.com/mahpud896/UDP-Custom/raw/main/module/udpgw
+chmod +x module/udpgw
