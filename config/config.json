@@ -1,0 +1,13 @@
+{
+  "listen": ":47712",
+  "target": "127.0.0.1:443",
+  "key": "",
+  "crt": "",
+  "udpgw_port": 7400,
+  "buffer_size": 32768,
+  "sock_buf": 33554432,
+  "limit": 0,
+  "mode": "udp",
+  "obfs": "",
+  "compress": false
+}
