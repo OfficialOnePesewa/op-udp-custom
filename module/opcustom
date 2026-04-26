@@ -1,5 +1,5 @@
 #!/bin/bash
-# UDP Custom menu
+# UDP Custom menu (opcustom)
 
 CUSTOM_DIR="/etc/UDPCustom"
 CONFIG="/root/udp/config.json"
