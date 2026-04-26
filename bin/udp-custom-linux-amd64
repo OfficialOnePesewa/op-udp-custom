@@ -1,4 +1,0 @@
-mkdir -p bin
-curl -L -o bin/udp-custom-linux-amd64 \
-  https://github.com/mahpud896/UDP-Custom/raw/main/bin/udp-custom-linux-amd64
-chmod +x bin/udp-custom-linux-amd64
