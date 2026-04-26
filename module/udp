@@ -1,0 +1,38 @@
+#!/bin/bash
+# UDP Custom menu
+
+CUSTOM_DIR="/etc/UDPCustom"
+CONFIG="/root/udp/config.json"
+
+show_menu() {
+    clear
+    echo -e "${YELLOW}==============================================${NC}"
+    echo -e "${CYAN}        UDP Custom Manager                     ${NC}"
+    echo -e "${YELLOW}==============================================${NC}"
+    echo -e " 1. Start service"
+    echo -e " 2. Stop service"
+    echo -e " 3. Restart service"
+    echo -e " 4. Show status"
+    echo -e " 5. Check users"
+    echo -e " 6. Edit config"
+    echo -e " 7. Apply bandwidth limit"
+    echo -e " 0. Exit"
+    echo -e "${YELLOW}==============================================${NC}"
+}
+
+while true; do
+    show_menu
+    read -p "Choose an option: " opt
+    case $opt in
+        1) systemctl start udp-custom ;;
+        2) systemctl stop udp-custom ;;
+        3) systemctl restart udp-custom ;;
+        4) systemctl status udp-custom | head -20 ;;
+        5) /etc/cek.sh ;;
+        6) nano "$CONFIG" ;;
+        7) /etc/limiter.sh ;;
+        0) echo "Goodbye!"; break ;;
+        *) echo "Invalid option" ;;
+    esac
+    read -p "Press Enter to continue..."
+done
