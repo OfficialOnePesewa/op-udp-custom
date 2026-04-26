@@ -1,0 +1,12 @@
+[Unit]
+Description=UDPGW Service for UDP Custom
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/udpgw -p 7400
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
