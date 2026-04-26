@@ -1,0 +1,12 @@
+[Unit]
+Description=UDP Custom Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/udp/udp-custom -udpgw-port 7400 -config /root/udp/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
