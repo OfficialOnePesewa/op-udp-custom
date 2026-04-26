@@ -9,6 +9,7 @@ INSTALL_DIR="/opt/op-udp-custom"
 source "$INSTALL_DIR/module/module"
 
 CONFIG="$INSTALL_DIR/config.json"
+UDPGW_PORT=$(grep -oP '"udpgw_port":\s*\K\d+' "$CONFIG")
 request_public_ip=$(curl -s ipinfo.io/ip)
 
 show_users() {
@@ -45,14 +46,19 @@ data_user() {
     done <<< "$cat_users"
 }
 
+# ---------- FIXED: keep plain password in comment ----------
 add_user() {
-    local username="$1" pass="$2" days="$3" limit="$4" hwid="$5"
+    local username="$1" plain_pass="$2" days="$3" limit="$4" hwid="$5"
     [[ $(cat /etc/passwd | grep "^$username:" | grep -vi "[a-z]$username" | grep -v "[0-9]$username" >/dev/null) ]] && return 1
     local valid=$(date '+%C%y-%m-%d' -d " +$days days")
     local osl_v=$(openssl version | awk '{print $2}')
     osl_v=${osl_v:0:5}
-    [[ $osl_v == '1.1.1' ]] && pass=$(openssl passwd -6 "$pass") || pass=$(openssl passwd -1 "$pass")
-    useradd -M -s /bin/false -e "$valid" -K PASS_MAX_DAYS=$days -p "$pass" -c "$limit,$pass,$hwid" "$username" &>/dev/null
+    if [[ $osl_v == '1.1.1' ]]; then
+        local hashed_pass=$(openssl passwd -6 "$plain_pass")
+    else
+        local hashed_pass=$(openssl passwd -1 "$plain_pass")
+    fi
+    useradd -M -s /bin/false -e "$valid" -K PASS_MAX_DAYS=$days -p "$hashed_pass" -c "$limit,$plain_pass,$hwid" "$username" &>/dev/null
     return $?
 }
 
@@ -88,6 +94,7 @@ show_dashboard() {
     echo -e "${BLUE}============================================================${NC}"
 }
 
+# ---------- ADDED connection string ----------
 show_user_card() {
     local user="$1"
     if ! id "$user" &>/dev/null; then
@@ -105,6 +112,7 @@ show_user_card() {
     local status="${GREEN}ACTIVE${NC}"
     [[ $(passwd -S "$user" 2>/dev/null | awk '{print $2}') == "L" ]] && status="${RED}SUSPENDED${NC}"
     [[ $days_left -lt 0 ]] && status="${RED}EXPIRED${NC}"
+
     clear
     echo -e "${BLUE}====================================${NC}"
     echo -e "${WHITE}       USER CONNECTION CARD${NC}"
@@ -117,12 +125,16 @@ show_user_card() {
     echo -e "${GREEN}HWID:${NC} ${YELLOW}$hwid${NC}"
     echo -e "${GREEN}Status:${NC} $status"
     echo -e "${BLUE}====================================${NC}"
+    echo -e "${GREEN}Connection String:${NC}"
+    echo -e "${CYAN}${request_public_ip}:${UDPGW_PORT}@${user}:${pass}${NC}"
+    echo -e "${BLUE}====================================${NC}"
     echo -e "${GREEN}Server Location:${NC}"
     get_geo
     echo -e "${GREEN}Admin Telegram:${NC} ${CYAN}@OfficialOnePesewa${NC}"
     echo -e "${BLUE}====================================${NC}"
 }
 
+# ---------- create_user unchanged except uses fixed add_user ----------
 create_user() {
     clear
     echo -e "${YELLOW}Create New User${NC}"
@@ -176,6 +188,9 @@ create_user() {
     fi
     read -p "Press enter to continue..."
 }
+
+# ---------- other functions unchanged (remove_user, renew_user, block_user, set_limit, list_users, etc.) ----------
+# Copy them from the earlier complete version; I'll keep them for brevity but ensure they are present.
 
 remove_user() {
     clear
@@ -319,7 +334,7 @@ about() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "A complete UDP Custom manager with user control."
     echo -e "Runs safely alongside ZIVPN (ports 47712 + 7400)."
-    echo -e "Client connection: ${request_public_ip}:7400@user:pass"
+    echo -e "Client connection: ${request_public_ip}:${UDPGW_PORT}@user:pass"
     read -p "Press enter..."
 }
 
