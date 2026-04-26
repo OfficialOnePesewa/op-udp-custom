@@ -1,38 +1,366 @@
 #!/bin/bash
-# UDP Custom menu (opcustom)
+# =============================================
+# OP UDP CUSTOM Manager – opcustom
+# Full user management + dashboard + server info
+# Telegram: @OfficialOnePesewa
+# =============================================
 
-CUSTOM_DIR="/etc/UDPCustom"
-CONFIG="/root/udp/config.json"
+INSTALL_DIR="/opt/op-udp-custom"
+source "$INSTALL_DIR/module/module"
 
-show_menu() {
-    clear
-    echo -e "${YELLOW}==============================================${NC}"
-    echo -e "${CYAN}        UDP Custom Manager                     ${NC}"
-    echo -e "${YELLOW}==============================================${NC}"
-    echo -e " 1. Start service"
-    echo -e " 2. Stop service"
-    echo -e " 3. Restart service"
-    echo -e " 4. Show status"
-    echo -e " 5. Check users"
-    echo -e " 6. Edit config"
-    echo -e " 7. Apply bandwidth limit"
-    echo -e " 0. Exit"
-    echo -e "${YELLOW}==============================================${NC}"
+CONFIG="$INSTALL_DIR/config.json"
+request_public_ip=$(curl -s ipinfo.io/ip)
+
+show_users() {
+    cat /etc/passwd | grep 'home' | grep 'false' | grep -v 'syslog' | grep -v '::/' | grep -v 'hwid\|token' | awk -F ':' '{print $1}'
 }
 
+data_user() {
+    local cat_users=$(cat /etc/passwd | grep 'home' | grep 'false' | grep -v 'syslog' | grep -v '::/' | grep -v 'hwid\|token')
+    [[ -z "$(echo "${cat_users}" | head -1)" ]] && {
+        print_center "${YELLOW}NO REGISTERED USERS${NC}"
+        return 1
+    }
+    printf '%-13s %-14s %-10s %-4s %-6s %s\n' "User" "Pass" "Date" "Days" "Lmt" "Stat"
+    msg_bar
+    while IFS=: read -r u _ _ _ _ comment _; do
+        local lim=$(echo "$comment" | cut -d',' -f1)
+        local pass=$(echo "$comment" | cut -d',' -f2)
+        local fecha=$(chage -l "$u" 2>/dev/null | grep "Account expires" | awk -F ': ' '{print $2}')
+        if [[ "$fecha" == "never" ]]; then
+            local days_left="N/A"
+            local stat="${GREEN}ULK${NC}"
+        else
+            local exp_epoch=$(date -d "$fecha" +%s 2>/dev/null)
+            local now_epoch=$(date +%s)
+            local days_left=$(( (exp_epoch - now_epoch) / 86400 ))
+            if [[ $days_left -lt 0 ]]; then
+                local stat="${RED}EXP${NC}"
+            else
+                local stat="${GREEN}ULK${NC}"
+            fi
+        fi
+        [[ $(passwd -S "$u" 2>/dev/null | awk '{print $2}') == "L" ]] && stat="${RED}BLK${NC}"
+        printf '%-13s %-14s %-10s %-4s %-6s %s\n' "$u" "$pass" "$fecha" "$days_left" "$lim" "$stat"
+    done <<< "$cat_users"
+}
+
+add_user() {
+    local username="$1" pass="$2" days="$3" limit="$4" hwid="$5"
+    [[ $(cat /etc/passwd | grep "^$username:" | grep -vi "[a-z]$username" | grep -v "[0-9]$username" >/dev/null) ]] && return 1
+    local valid=$(date '+%C%y-%m-%d' -d " +$days days")
+    local osl_v=$(openssl version | awk '{print $2}')
+    osl_v=${osl_v:0:5}
+    [[ $osl_v == '1.1.1' ]] && pass=$(openssl passwd -6 "$pass") || pass=$(openssl passwd -1 "$pass")
+    useradd -M -s /bin/false -e "$valid" -K PASS_MAX_DAYS=$days -p "$pass" -c "$limit,$pass,$hwid" "$username" &>/dev/null
+    return $?
+}
+
+rm_user() { userdel -r "$1" &>/dev/null; return $?; }
+renew_user_fun() { local valid=$(date '+%C%y-%m-%d' -d " +$2 days"); chage -E "$valid" "$1" &>/dev/null; return $?; }
+
+get_geo() {
+    local geo=$(curl -s "http://ip-api.com/json/$request_public_ip")
+    if [[ $(echo "$geo" | grep -c '"status":"success"') -gt 0 ]]; then
+        echo -e "IP: $request_public_ip\nCountry: $(echo $geo | grep -oP '"country":"\K[^"]+')\nCity: $(echo $geo | grep -oP '"city":"\K[^"]+')\nISP: $(echo $geo | grep -oP '"isp":"\K[^"]+')"
+    else
+        echo "Geo info unavailable"
+    fi
+}
+
+show_dashboard() {
+    clear
+    echo -e "${BLUE}============================================================${NC}"
+    echo -e "${WHITE}       OP UDP CUSTOM Manager – @OfficialOnePesewa${NC}"
+    echo -e "${BLUE}============================================================${NC}"
+    local os_info=$(lsb_release -ds 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
+    local kernel=$(uname -r)
+    local date_gmt=$(TZ=UTC date +"%Y-%m-%d %H:%M:%S")
+    echo -e "${GREEN}OS:${NC} $os_info"
+    echo -e "${GREEN}Kernel:${NC} $kernel"
+    echo -e "${GREEN}Date (GMT):${NC} $date_gmt"
+    echo -e "${GREEN}Server Location:${NC}"
+    get_geo
+    echo -e "${GREEN}Admin Telegram:${NC} ${CYAN}@OfficialOnePesewa${NC}"
+    echo -e "${BLUE}------------------------------------------------------------${NC}"
+    local total_users=$(show_users | wc -l)
+    echo -e "Total Users: ${YELLOW}$total_users${NC}"
+    echo -e "${BLUE}============================================================${NC}"
+}
+
+show_user_card() {
+    local user="$1"
+    if ! id "$user" &>/dev/null; then
+        echo -e "${RED}User not found.${NC}"
+        return 1
+    fi
+    local comment=$(grep "^$user:" /etc/passwd | cut -d: -f5)
+    local limit=$(echo "$comment" | cut -d',' -f1)
+    local pass=$(echo "$comment" | cut -d',' -f2)
+    local hwid=$(echo "$comment" | cut -d',' -f3)
+    local exp_date=$(chage -l "$user" 2>/dev/null | grep "Account expires" | awk -F ': ' '{print $2}')
+    local exp_epoch=$(date -d "$exp_date" +%s 2>/dev/null)
+    local now_epoch=$(date +%s)
+    local days_left=$(( (exp_epoch - now_epoch) / 86400 ))
+    local status="${GREEN}ACTIVE${NC}"
+    [[ $(passwd -S "$user" 2>/dev/null | awk '{print $2}') == "L" ]] && status="${RED}SUSPENDED${NC}"
+    [[ $days_left -lt 0 ]] && status="${RED}EXPIRED${NC}"
+    clear
+    echo -e "${BLUE}====================================${NC}"
+    echo -e "${WHITE}       USER CONNECTION CARD${NC}"
+    echo -e "${BLUE}====================================${NC}"
+    echo -e "${GREEN}Username:${NC} ${CYAN}$user${NC}"
+    echo -e "${GREEN}Password:${NC} ${CYAN}$pass${NC}"
+    echo -e "${GREEN}Expiry:${NC} $exp_date"
+    echo -e "${GREEN}Days Left:${NC} ${YELLOW}$days_left${NC}"
+    echo -e "${GREEN}Connection Limit:${NC} ${YELLOW}$limit${NC}"
+    echo -e "${GREEN}HWID:${NC} ${YELLOW}$hwid${NC}"
+    echo -e "${GREEN}Status:${NC} $status"
+    echo -e "${BLUE}====================================${NC}"
+    echo -e "${GREEN}Server Location:${NC}"
+    get_geo
+    echo -e "${GREEN}Admin Telegram:${NC} ${CYAN}@OfficialOnePesewa${NC}"
+    echo -e "${BLUE}====================================${NC}"
+}
+
+create_user() {
+    clear
+    echo -e "${YELLOW}Create New User${NC}"
+    msg_bar
+    local active_users=($(show_users))
+
+    while true; do
+        read -p "$(echo -e "${WHITE}Username: ${NC}")" nameuser
+        nameuser=$(echo "$nameuser" | sed 'y/áÁàÀãÃâÂéÉêÊíÍóÓõÕôÔúÚñÑçÇªº/aAaAaAaAeEeEiIoOoOoOuUnNcCao/')
+        nameuser=$(echo "$nameuser" | sed -e 's/[^a-z0-9 -]//ig')
+        if [[ -z "$nameuser" ]]; then err_fun 1
+        elif [[ "${#nameuser}" -lt 4 ]]; then err_fun 2
+        elif [[ "${#nameuser}" -gt 12 ]]; then err_fun 3
+        elif [[ "$(echo ${active_users[@]} | grep -w "$nameuser")" ]]; then err_fun 10
+        else break; fi
+    done
+
+    while true; do
+        read -p "$(echo -e "${WHITE}Password: ${NC}")" userpass
+        userpass=$(echo "$userpass" | sed 'y/áÁàÀãÃâÂéÉêÊíÍóÓõÕôÔúÚñÑçÇªº/aAaAaAaAeEeEiIoOoOoOuUnNcCao/')
+        if [[ -z "$userpass" ]]; then err_fun 4
+        elif [[ "${#userpass}" -lt 4 ]]; then err_fun 5
+        elif [[ "${#userpass}" -gt 12 ]]; then err_fun 6
+        else break; fi
+    done
+
+    while true; do
+        read -p "$(echo -e "${WHITE}Expiry (days): ${NC}")" userdays
+        if [[ -z "$userdays" ]]; then err_fun 7
+        elif [[ ! "$userdays" =~ ^[0-9]+$ ]]; then err_fun 8
+        elif [[ "$userdays" -gt 360 ]]; then err_fun 9
+        else break; fi
+    done
+
+    while true; do
+        read -p "$(echo -e "${WHITE}Connection Limit: ${NC}")" limiteuser
+        if [[ -z "$limiteuser" ]]; then err_fun 11
+        elif [[ ! "$limiteuser" =~ ^[0-9]+$ ]]; then err_fun 12
+        elif [[ "$limiteuser" -gt 999 ]]; then err_fun 13
+        else break; fi
+    done
+
+    read -p "$(echo -e "${WHITE}HWID: ${NC}")" hwid
+
+    add_user "$nameuser" "$userpass" "$userdays" "$limiteuser" "$hwid"
+    if [[ $? -eq 0 ]]; then
+        echo -e "${GREEN}User created successfully!${NC}"
+        show_user_card "$nameuser"
+    else
+        echo -e "${RED}Error: User not created.${NC}"
+    fi
+    read -p "Press enter to continue..."
+}
+
+remove_user() {
+    clear
+    local active_users=($(show_users))
+    [[ ${#active_users[@]} -eq 0 ]] && { echo -e "${YELLOW}No users to remove.${NC}"; read -p "Press enter..."; return; }
+    echo -e "${YELLOW}Remove User${NC}"
+    msg_bar
+    data_user
+    echo ""
+    read -p "$(echo -e "${WHITE}Username to remove: ${NC}")" userdel
+    userdel=$(echo "$userdel" | sed 's/ //g')
+    if id "$userdel" &>/dev/null; then
+        rm_user "$userdel" && echo -e "${GREEN}User removed.${NC}" || echo -e "${RED}Error removing user.${NC}"
+    else
+        echo -e "${RED}User not found.${NC}"
+    fi
+    read -p "Press enter to continue..."
+}
+
+renew_user() {
+    clear
+    local active_users=($(show_users))
+    [[ ${#active_users[@]} -eq 0 ]] && { echo -e "${YELLOW}No users to renew.${NC}"; read -p "Press enter..."; return; }
+    echo -e "${YELLOW}Renew User${NC}"
+    msg_bar
+    data_user
+    echo ""
+    read -p "$(echo -e "${WHITE}Username to renew: ${NC}")" useredit
+    useredit=$(echo "$useredit" | sed 's/ //g')
+    if ! id "$useredit" &>/dev/null; then
+        echo -e "${RED}User not found.${NC}"; read -p "Press enter..."; return
+    fi
+    while true; do
+        read -p "$(echo -e "${WHITE}Add days: ${NC}")" userdays
+        if [[ -z "$userdays" ]]; then err_fun 7
+        elif [[ ! "$userdays" =~ ^[0-9]+$ ]]; then err_fun 8
+        elif [[ "$userdays" -gt 360 ]]; then err_fun 9
+        else break; fi
+    done
+    renew_user_fun "$useredit" "$userdays" && echo -e "${GREEN}User renewed.${NC}" && show_user_card "$useredit" || echo -e "${RED}Error.${NC}"
+    read -p "Press enter..."
+}
+
+block_user() {
+    clear
+    local active_users=($(show_users))
+    [[ ${#active_users[@]} -eq 0 ]] && { echo -e "${YELLOW}No users to block/unblock.${NC}"; read -p "Press enter..."; return; }
+    echo -e "${YELLOW}Block/Unblock User${NC}"
+    msg_bar
+    data_user
+    echo ""
+    read -p "$(echo -e "${WHITE}Username: ${NC}")" userblock
+    userblock=$(echo "$userblock" | sed 's/ //g')
+    if id "$userblock" &>/dev/null; then
+        [[ $(passwd -S "$userblock" | awk '{print $2}') == "L" ]] && passwd -u "$userblock" &>/dev/null && echo -e "${GREEN}User unlocked.${NC}" || { passwd -l "$userblock" &>/dev/null && echo -e "${GREEN}User blocked.${NC}"; }
+    else
+        echo -e "${RED}User not found.${NC}"
+    fi
+    read -p "Press enter..."
+}
+
+set_limit() {
+    clear
+    local active_users=($(show_users))
+    [[ ${#active_users[@]} -eq 0 ]] && { echo -e "${YELLOW}No users.${NC}"; read -p "Press enter..."; return; }
+    echo -e "${YELLOW}Set Connection Limit${NC}"
+    msg_bar
+    data_user
+    echo ""
+    read -p "$(echo -e "${WHITE}Username: ${NC}")" userlimit
+    userlimit=$(echo "$userlimit" | sed 's/ //g')
+    if id "$userlimit" &>/dev/null; then
+        while true; do
+            read -p "$(echo -e "${WHITE}New limit: ${NC}")" newlimit
+            if [[ -z "$newlimit" ]]; then err_fun 11
+            elif [[ ! "$newlimit" =~ ^[0-9]+$ ]]; then err_fun 12
+            elif [[ "$newlimit" -gt 999 ]]; then err_fun 13
+            else break; fi
+        done
+        local old_comment=$(grep "^$userlimit:" /etc/passwd | cut -d: -f5)
+        local pass=$(echo "$old_comment" | cut -d',' -f2)
+        local hwid=$(echo "$old_comment" | cut -d',' -f3)
+        usermod -c "$newlimit,$pass,$hwid" "$userlimit"
+        echo -e "${GREEN}Limit updated.${NC}"
+        show_user_card "$userlimit"
+    else
+        echo -e "${RED}User not found.${NC}"
+    fi
+    read -p "Press enter..."
+}
+
+list_users() {
+    clear
+    echo -e "${YELLOW}All Users${NC}"
+    msg_bar
+    data_user
+    read -p "Press enter to continue..."
+}
+
+server_info() {
+    clear
+    echo -e "${YELLOW}Server Information${NC}"
+    msg_bar
+    show_dashboard
+    read -p "Press enter to return..."
+}
+
+torrent_blocker() {
+    clear
+    echo -e "${YELLOW}Applying Torrent Blocker (common p2p ports)...${NC}"
+    for port in 6881:6889 6969 1337 1337 31337; do
+        iptables -A INPUT -p tcp --dport $port -j DROP
+        iptables -A INPUT -p udp --dport $port -j DROP
+    done
+    echo -e "${GREEN}Torrent ports blocked.${NC}"
+    read -p "Press enter..."
+}
+
+remove_script() {
+    clear
+    echo -e "${RED}WARNING: This will uninstall OP UDP CUSTOM.${NC}"
+    read -p "Are you sure? (y/n): " confirm
+    if [[ "$confirm" == "y" ]]; then
+        systemctl stop op-udpgw op-udp-custom &>/dev/null
+        systemctl disable op-udpgw op-udp-custom &>/dev/null
+        rm -rf /opt/op-udp-custom /usr/local/bin/opcustom /etc/systemd/system/op-udpgw.service /etc/systemd/system/op-udp-custom.service
+        echo -e "${GREEN}OP UDP CUSTOM removed.${NC}"
+        exit 0
+    else
+        echo "Cancelled."
+    fi
+    read -p "Press enter to return..."
+}
+
+about() {
+    clear
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${WHITE}  OP UDP CUSTOM – v1.0${NC}"
+    echo -e "${GREEN}  Telegram: @OfficialOnePesewa${NC}"
+    echo -e "${GREEN}  GitHub: OfficialOnePesewa/op-udp-custom${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "A complete UDP Custom manager with user control."
+    echo -e "Runs safely alongside ZIVPN (ports 47712 + 7400)."
+    echo -e "Client connection: ${request_public_ip}:7400@user:pass"
+    read -p "Press enter..."
+}
+
+# Main Menu
 while true; do
-    show_menu
+    show_dashboard
+    echo ""
+    echo -e "${YELLOW}Options:${NC}"
+    echo " 1. Create User"
+    echo " 2. Remove User"
+    echo " 3. Renew User"
+    echo " 4. Block/Unblock User"
+    echo " 5. Set Connection Limit"
+    echo " 6. List All Users"
+    echo " 7. Server Information"
+    echo " 8. Torrent Blocker"
+    echo " 9. Edit Config (nano)"
+    echo "10. Restart OP UDP Service"
+    echo "11. Show Service Status"
+    echo "12. Apply Bandwidth Limiter"
+    echo "13. Uninstall OP UDP CUSTOM"
+    echo "14. About"
+    echo " 0. Exit"
+    echo ""
     read -p "Choose an option: " opt
     case $opt in
-        1) systemctl start udp-custom ;;
-        2) systemctl stop udp-custom ;;
-        3) systemctl restart udp-custom ;;
-        4) systemctl status udp-custom | head -20 ;;
-        5) /etc/cek.sh ;;
-        6) nano "$CONFIG" ;;
-        7) /etc/limiter.sh ;;
-        0) echo "Goodbye!"; break ;;
-        *) echo "Invalid option" ;;
+        1) create_user ;;
+        2) remove_user ;;
+        3) renew_user ;;
+        4) block_user ;;
+        5) set_limit ;;
+        6) list_users ;;
+        7) server_info ;;
+        8) torrent_blocker ;;
+        9) nano "$CONFIG" ;;
+        10) systemctl restart op-udp-custom && echo "Restarted."; sleep 1 ;;
+        11) systemctl status op-udp-custom | head -20; read -p "Press enter..." ;;
+        12) bash "$INSTALL_DIR/module/limiter.sh"; echo "Limiter applied."; sleep 1 ;;
+        13) remove_script ;;
+        14) about ;;
+        0) clear; echo -e "${GREEN}Goodbye.${NC}"; exit 0 ;;
+        *) echo -e "${RED}Invalid option${NC}"; sleep 1 ;;
     esac
-    read -p "Press Enter to continue..."
 done
